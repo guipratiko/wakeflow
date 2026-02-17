@@ -312,6 +312,8 @@ app.post('/smarthome', (req, res) => {
   if (typeof body === 'string') try { body = JSON.parse(body); } catch { body = {}; }
   body = body || {};
 
+  if (LOG_REQUESTS) console.log('[SMARTHOME] POST body keys:', Object.keys(body));
+
   let directive = body.directive || body.Directive;
   if (!directive && body.request) {
     const req_ = body.request;
@@ -346,6 +348,9 @@ app.post('/smarthome', (req, res) => {
   if (!directive && body.header && body.endpoint) {
     directive = { header: body.header, endpoint: body.endpoint, payload: body.payload || {} };
   }
+  if (!directive && body.header && body.payload) {
+    directive = { header: body.header, endpoint: {}, payload: body.payload };
+  }
 
   if (!directive || !directive.header) {
     const req_ = body.request;
@@ -373,6 +378,9 @@ app.post('/smarthome', (req, res) => {
 
   // Discover
   if (ns === 'Alexa.Discovery' && name === 'Discover') {
+    if (LOG_REQUESTS) {
+      console.log('[SMARTHOME] Discover: token=', token ? token.slice(0, 8) + '...' : 'vazio', 'userId=', userId, 'devices no total=', devices.size);
+    }
     const endpoints = [];
     for (const [devId, d] of devices.entries()) {
       if (d.userId !== userId || !d.mac) continue;
@@ -393,6 +401,7 @@ app.post('/smarthome', (req, res) => {
         ],
       });
     }
+    if (LOG_REQUESTS) console.log('[SMARTHOME] Discover.Response: endpoints=', endpoints.length);
     return res.status(200).json({
       event: {
         header: { namespace: 'Alexa.Discovery', name: 'Discover.Response', payloadVersion: '3', messageId: uuidv4() },
