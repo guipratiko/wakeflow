@@ -1,0 +1,13 @@
+{
+  "name": "wakeflow-account-linking",
+  "version": "1.0.0",
+  "description": "Backend WakeFlow: OAuth, Skill Alexa (Custom + Smart Home), Dashboard, API dispositivo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  }
+}

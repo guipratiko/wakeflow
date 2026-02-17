@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WakeFlow – Login do dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 360px; margin: 2rem auto; padding: 1rem; }
+    h1 { font-size: 1.25rem; margin-bottom: 1.5rem; }
+    label { display: block; margin-bottom: 0.25rem; font-weight: 500; }
+    input { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 4px; }
+    button { width: 100%; padding: 0.6rem; background: #146eb4; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; }
+    .error { color: #c00; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>WakeFlow – Dashboard</h1>
+  <div id="error" class="error" style="display: none;">Usuário ou senha inválidos.</div>
+  <form method="post" action="/dashboard/login">
+    <label for="username">Usuário</label>
+    <input id="username" name="username" type="text" required>
+    <label for="password">Senha</label>
+    <input id="password" name="password" type="password" required>
+    <button type="submit">Entrar</button>
+  </form>
+  <script>
+    if (new URLSearchParams(location.search).get('error') === 'invalid') {
+      document.getElementById('error').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

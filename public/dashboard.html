@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WakeFlow – Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 1rem; }
+    h1 { font-size: 1.25rem; }
+    a { color: #146eb4; }
+    nav { margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 0.5rem; text-align: left; border-bottom: 1px solid #eee; }
+    th { font-weight: 600; }
+    input { padding: 0.4rem; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 0.4rem 0.8rem; background: #146eb4; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button.secondary { background: #666; }
+    .add-form { margin: 1.5rem 0; padding: 1rem; background: #f5f5f5; border-radius: 8px; }
+    .add-form label { display: block; margin-bottom: 0.25rem; }
+    .add-form input { margin-bottom: 0.75rem; width: 100%; max-width: 320px; }
+    .license { font-family: monospace; font-size: 0.9rem; }
+    .wol-form { display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <nav><a href="/dashboard">Dispositivos</a> | <form method="post" action="/dashboard/logout" style="display:inline"><button type="submit" class="secondary">Sair</button></form></nav>
+  <h1>Dispositivos WakeFlow</h1>
+  <p>Adicione o MAC do PC para usar com a Alexa (ligar/desligar).</p>
+
+  <div class="add-form">
+    <h2>Adicionar dispositivo</h2>
+    <form id="addForm">
+      <label>MAC do PC (ex.: 58:11:22:B6:48:75)</label>
+      <input type="text" name="mac" placeholder="58:11:22:B6:48:75" required>
+      <label>Nome (ex.: Computador)</label>
+      <input type="text" name="name" placeholder="Computador">
+      <label>Host para WoL (opcional – IP para o servidor enviar WoL na skill Custom)</label>
+      <input type="text" name="wolTargetHost" placeholder="192.168.1.100 ou IP público">
+      <label>Porta WoL (padrão 9)</label>
+      <input type="number" name="wolTargetPort" value="9" min="1" max="65535">
+      <button type="submit">Adicionar</button>
+    </form>
+  </div>
+
+  <h2>Lista de dispositivos</h2>
+  <div id="list"></div>
+
+  <script>
+    function fetchDevices() {
+      return fetch('/dashboard/api/devices', { credentials: 'include' })
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    }
+
+    function render(devices) {
+      const list = document.getElementById('list');
+      if (!devices.length) {
+        list.innerHTML = '<p>Nenhum dispositivo. Adicione um acima.</p>';
+        return;
+      }
+      list.innerHTML = '<table><thead><tr><th>Nome</th><th>MAC</th><th>Licença</th><th>WoL</th><th>Ações</th></tr></thead><tbody></tbody></table>';
+      const tbody = list.querySelector('tbody');
+      devices.forEach(d => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + (d.name || 'PC') + '</td>' +
+          '<td>' + (d.mac || '') + '</td>' +
+          '<td class="license">' + (d.licenseKey || '–') + '</td>' +
+          '<td><div class="wol-form"><input type="text" data-id="' + d.deviceId + '" data-field="wolTargetHost" placeholder="Host" value="' + (d.wolTargetHost || '') + '" size="14"><input type="number" data-id="' + d.deviceId + '" data-field="wolTargetPort" value="' + (d.wolTargetPort ?? 9) + '" min="1" max="65535" size="4"><button type="button" class="save-wol">Salvar WoL</button></div></td>' +
+          '<td></td>';
+        tbody.appendChild(tr);
+      });
+      list.querySelectorAll('.save-wol').forEach(btn => {
+        btn.onclick = function() {
+          const row = this.closest('tr');
+          const deviceId = row.querySelector('[data-field="wolTargetHost"]').dataset.id;
+          const wolTargetHost = row.querySelector('[data-field="wolTargetHost"]').value.trim() || null;
+          const wolTargetPort = parseInt(row.querySelector('[data-field="wolTargetPort"]').value, 10);
+          fetch('/dashboard/api/devices/' + deviceId, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wolTargetHost, wolTargetPort: Number.isFinite(wolTargetPort) ? wolTargetPort : 9 }),
+          }).then(r => r.json()).then(() => load()).catch(() => alert('Erro ao salvar'));
+        };
+      });
+    }
+
+    function load() {
+      fetchDevices().then(data => render(data.devices || [])).catch(() => { document.getElementById('list').innerHTML = '<p>Erro ao carregar. <a href="/dashboard/login">Fazer login</a>.</p>'; });
+    }
+
+    document.getElementById('addForm').onsubmit = function(e) {
+      e.preventDefault();
+      const fd = new FormData(this);
+      const body = { mac: fd.get('mac'), name: fd.get('name'), wolTargetHost: fd.get('wolTargetHost') || null, wolTargetPort: fd.get('wolTargetPort') || 9 };
+      fetch('/dashboard/api/devices', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json()).then(data => { alert('Dispositivo adicionado. Licença: ' + (data.licenseKey || '')); this.reset(); load(); }).catch(() => alert('Erro ao adicionar'));
+    };
+
+    load();
+  </script>
+</body>
+</html>
