@@ -410,6 +410,9 @@ app.post('/smarthome', (req, res) => {
     const endpoints = [];
     for (const [devId, d] of devices.entries()) {
       if (d.userId !== userId || !d.mac) continue;
+      // Só devolver dispositivos com app conectado por WebSocket (evita Alexa usar deviceId antigo/cache)
+      const ws = deviceWebSockets.get(devId);
+      if (!ws || ws.readyState !== 1) continue;
       const macAlexa = macForAlexa(d.mac);
       if (!macAlexa) continue;
       endpoints.push({
@@ -486,7 +489,7 @@ app.post('/smarthome', (req, res) => {
     if (device && device.userId === userId) {
       sendCommandToDevice(endpointId, 'shutdown');
     } else if (LOG_REQUESTS) {
-      console.log('[SMARTHOME] TurnOff ignorado: dispositivo não encontrado ou userId diferente');
+      console.log('[SMARTHOME] TurnOff ignorado: dispositivo não encontrado ou userId diferente. Peça à Alexa: "Descobrir dispositivos" e tente de novo.');
     }
     const now = new Date().toISOString();
     return res.status(200).json({
