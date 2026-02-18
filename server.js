@@ -4,9 +4,11 @@
 
 const express = require('express');
 const fs = require('fs');
+const http = require('http');
 const dgram = require('dgram');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const { WebSocketServer } = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -92,6 +94,8 @@ function saveLicenses() {
 const devices = loadDevices();
 const licenses = loadLicenses();
 const dashboardSessions = new Map();
+/** deviceId -> WebSocket (cliente Windows conectado em tempo real) */
+const deviceWebSockets = new Map();
 
 function normalizeMac(mac) {
   if (!mac || typeof mac !== 'string') return '';
@@ -101,6 +105,28 @@ function normalizeMac(mac) {
 function macForAlexa(macNorm) {
   if (!macNorm || macNorm.length !== 12) return '';
   return macNorm.match(/.{2}/g).map(s => s.toUpperCase()).join('-');
+}
+
+/** Envia comando ao dispositivo: por WebSocket se conectado, senão deixa em pendingCommand para poll. */
+function sendCommandToDevice(deviceId, command) {
+  const device = devices.get(deviceId);
+  if (!device) return false;
+  const ws = deviceWebSockets.get(deviceId);
+  if (ws && ws.readyState === 1) {
+    try {
+      ws.send(JSON.stringify({ command }));
+      device.lastSeen = new Date().toISOString();
+      saveDevices();
+      if (LOG_REQUESTS) console.log('[SMARTHOME] Comando enviado por WebSocket:', deviceId, command);
+      return true;
+    } catch (e) {
+      deviceWebSockets.delete(deviceId);
+    }
+  }
+  device.pendingCommand = command;
+  saveDevices();
+  if (LOG_REQUESTS) console.log('[SMARTHOME] Nenhum cliente WebSocket conectado para', deviceId, '- comando guardado em pendingCommand (app deve estar aberto e conectado)');
+  return false;
 }
 
 function findUser(username, password) {
@@ -455,10 +481,12 @@ app.post('/smarthome', (req, res) => {
 
   // TurnOff
   if (ns === 'Alexa.PowerController' && name === 'TurnOff') {
+    if (LOG_REQUESTS) console.log('[SMARTHOME] TurnOff recebido, endpointId=', endpointId, 'userId=', userId);
     const device = devices.get(endpointId);
-    if (device && device.userId === userId && device.deviceToken) {
-      device.pendingCommand = 'shutdown';
-      saveDevices();
+    if (device && device.userId === userId) {
+      sendCommandToDevice(endpointId, 'shutdown');
+    } else if (LOG_REQUESTS) {
+      console.log('[SMARTHOME] TurnOff ignorado: dispositivo não encontrado ou userId diferente');
     }
     const now = new Date().toISOString();
     return res.status(200).json({
@@ -582,7 +610,7 @@ app.post('/dashboard/api/devices', (req, res) => {
   licenses.set(licenseKey, { userId, deviceId, createdAt: Date.now() });
   saveDevices();
   saveLicenses();
-  res.status(201).json({ deviceId, licenseKey, message: 'Use esta licença no software Windows.' });
+  res.status(201).json({ deviceId, licenseKey, message: 'No software Windows, informe seu login (ID do usuário) e esta chave de licença para atrelar o PC à sua conta.' });
 });
 
 app.patch('/dashboard/api/devices/:deviceId', (req, res) => {
@@ -602,11 +630,14 @@ app.patch('/dashboard/api/devices/:deviceId', (req, res) => {
 
 // ---------- API dispositivo (cliente Windows) ----------
 app.post('/api/device/register', (req, res) => {
-  const { licenseKey, mac } = req.body || {};
+  const { licenseKey, mac, userId: bodyUserId } = req.body || {};
   const macNorm = normalizeMac(mac);
   if (!licenseKey || !macNorm) return res.status(400).json({ error: 'licenseKey e mac são obrigatórios' });
+  const userIdParam = bodyUserId != null ? String(bodyUserId).trim() : null;
+  if (!userIdParam) return res.status(400).json({ error: 'userId é obrigatório (use o mesmo login do dashboard)' });
   const lic = licenses.get(String(licenseKey).trim());
   if (!lic) return res.status(404).json({ error: 'Licença inválida' });
+  if (lic.userId !== userIdParam) return res.status(403).json({ error: 'Licença não pertence a este usuário' });
   const device = devices.get(lic.deviceId);
   if (!device) return res.status(404).json({ error: 'Dispositivo não encontrado' });
   if (device.mac !== macNorm) return res.status(400).json({ error: 'MAC não confere' });
@@ -633,9 +664,45 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const url = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
+  if (url.pathname !== '/api/device/ws') {
+    socket.destroy();
+    return;
+  }
+  const deviceId = url.searchParams.get('deviceId');
+  const deviceToken = url.searchParams.get('deviceToken');
+  if (!deviceId || !deviceToken) {
+    socket.destroy();
+    return;
+  }
+  const device = devices.get(deviceId);
+  if (!device || device.deviceToken !== deviceToken) {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(request, socket, head, (ws) => {
+    const old = deviceWebSockets.get(deviceId);
+    if (old && old.readyState === 1) old.close();
+    deviceWebSockets.set(deviceId, ws);
+    device.lastSeen = new Date().toISOString();
+    saveDevices();
+    if (LOG_REQUESTS) console.log('[WS] device connected:', deviceId);
+    ws.on('close', () => {
+      deviceWebSockets.delete(deviceId);
+      if (LOG_REQUESTS) console.log('[WS] device disconnected:', deviceId);
+    });
+    ws.on('error', () => { deviceWebSockets.delete(deviceId); });
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`WakeFlow rodando em ${BASE_URL}`);
   console.log(`  OAuth: ${BASE_URL}/oauth/authorize | ${BASE_URL}/oauth/token`);
   console.log(`  Skill: ${BASE_URL}/skill | Smart Home: ${BASE_URL}/smarthome`);
   console.log(`  Dashboard: ${BASE_URL}/dashboard`);
+  console.log(`  WebSocket: wss://.../api/device/ws?deviceId=...&deviceToken=...`);
 });

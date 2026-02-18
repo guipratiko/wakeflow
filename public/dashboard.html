@@ -99,7 +99,10 @@
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      }).then(r => r.json()).then(data => { alert('Dispositivo adicionado. Licença: ' + (data.licenseKey || '')); this.reset(); load(); }).catch(() => alert('Erro ao adicionar'));
+      }).then(r => r.json()).then(data => {
+        alert('Dispositivo adicionado.\n\nNo app WakeFlow (Windows), use:\n• ID do usuário: o mesmo login deste dashboard\n• Chave de licença: ' + (data.licenseKey || ''));
+        this.reset(); load();
+      }).catch(() => alert('Erro ao adicionar'));
     };
 
     load();
